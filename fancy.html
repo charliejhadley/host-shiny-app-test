@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Shiny App</title>
+  <style>
+    :root {
+      --ink: #17324d;
+      --muted: #5c7288;
+      --paper: #eef3f7;
+      --line: #c9d6e2;
+      --go: #2f8f6b;
+      --warn: #b4552d;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex;
+      flex-direction: column;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    header {
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;
+      padding: 0.75rem 1.25rem;
+      border-bottom: 1px solid var(--line);
+    }
+    header h1 { font-size: 1.125rem; font-weight: 600; margin: 0; }
+    header p  { font-size: 0.875rem; color: var(--muted); margin: 0; }
+
+    /* The app area fills the rest of the viewport */
+    .stage { position: relative; flex: 1; }
+    .stage iframe {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      border: 0;
+      background: #fff;
+      opacity: 0;
+      transition: opacity 300ms ease;
+    }
+    .stage.ready iframe { opacity: 1; }
+
+    /* Loading overlay with two real stages: page loaded, then app ready */
+    .overlay {
+      position: absolute; inset: 0;
+      display: grid; place-items: center;
+      background: var(--paper);
+      transition: opacity 300ms ease, visibility 300ms;
+    }
+    .stage.ready .overlay { opacity: 0; visibility: hidden; }
+    .status { width: min(22rem, 85vw); }
+    .status ol { list-style: none; margin: 0 0 1rem; padding: 0; }
+    .status li {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.4rem 0; color: var(--muted);
+    }
+    .status li::before {
+      content: ""; width: 0.75rem; height: 0.75rem; border-radius: 50%;
+      border: 2px solid var(--line);
+      flex-shrink: 0;
+    }
+    .status li.active { color: var(--ink); }
+    .status li.active::before {
+      border-color: var(--ink); border-right-color: transparent;
+      animation: spin 0.8s linear infinite;
+    }
+    .status li.done { color: var(--ink); }
+    .status li.done::before { background: var(--go); border-color: var(--go); }
+    .message { font-size: 0.875rem; color: var(--muted); min-height: 1.25em; margin: 0; }
+    .message.error { color: var(--warn); }
+    .message a { color: inherit; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .status li.active::before { animation: none; border-right-color: var(--ink); }
+      .stage iframe, .overlay { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>My Shiny App</h1>
+    <p>Interactive analysis, hosted on shinyapps.io</p>
+  </header>
+
+  <main class="stage" id="stage">
+    <iframe id="shiny-frame" title="Shiny application"></iframe>
+
+    <div class="overlay" role="status" aria-live="polite">
+      <div class="status">
+        <ol>
+          <li id="step-page" class="active">Loading page</li>
+          <li id="step-app">Starting the app</li>
+        </ol>
+        <p class="message" id="message"></p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // ---- Configuration -----------------------------------------------------
+    // Your deployed Shiny app. Keep the trailing slash for shinyapps.io.
+    const APP_URL = "https://charlie-visibledata.shinyapps.io/loading-app-2/";
+
+    // If the app never sends its "ready" message, reveal it anyway after this
+    // long. Free shinyapps.io apps can take 20–40 s to wake from sleep.
+    const READY_TIMEOUT_MS = 60000;
+
+    // ---- Load detection ----------------------------------------------------
+    const APP_ORIGIN = new URL(APP_URL).origin;
+    const stage   = document.getElementById("stage");
+    const iframe  = document.getElementById("shiny-frame");
+    const stepPg  = document.getElementById("step-page");
+    const stepApp = document.getElementById("step-app");
+    const message = document.getElementById("message");
+
+    let pageLoaded = false;
+    let appReady   = false;
+
+    // Stage 1: the iframe's HTML document has loaded.
+    // This fires when the page skeleton arrives, BEFORE Shiny has connected
+    // its websocket and rendered outputs. It also fires for error pages.
+    iframe.addEventListener("load", () => {
+      if (pageLoaded) return;          // ignore reloads/navigations inside the frame
+      pageLoaded = true;
+      stepPg.className = "done";
+      if (!appReady) stepApp.className = "active";
+      console.log("[shiny-embed] iframe document loaded");
+      document.dispatchEvent(new CustomEvent("shiny-iframe-loaded"));
+    });
+
+    // Stage 2: the Shiny app tells us it is actually ready (see app.R).
+    // The app is on a different origin, so the parent page cannot look inside
+    // the iframe; postMessage is the only reliable way to know.
+    window.addEventListener("message", (event) => {
+      if (event.origin !== APP_ORIGIN) return;      // only trust the app
+      if (!event.data || event.data.type !== "shiny-app-ready") return;
+      markReady("message");
+    });
+
+    function markReady(source) {
+      if (appReady) return;
+      appReady = true;
+      clearTimeout(timeoutId);
+      stepPg.className = "done";
+      stepApp.className = "done";
+      stage.classList.add("ready");
+      console.log(`[shiny-embed] app ready (via ${source})`);
+      // Hook for your own code: document.addEventListener("shiny-app-ready", …)
+      document.dispatchEvent(new CustomEvent("shiny-app-ready", { detail: { source } }));
+    }
+
+    // Fallback: show whatever is in the frame and explain what happened.
+    const timeoutId = setTimeout(() => {
+      if (appReady) return;
+      message.classList.add("error");
+      message.innerHTML = pageLoaded
+        ? "The app is taking longer than usual to start. Showing it now."
+        : `The app didn't load. <a href="${APP_URL}" target="_blank" rel="noopener">Open it in a new tab</a>.`;
+      if (pageLoaded) setTimeout(() => markReady("timeout"), 1500);
+    }, READY_TIMEOUT_MS);
+
+    // Set src LAST, after all listeners exist, so the load event can't be missed.
+    iframe.src = APP_URL;
+  </script>
+</body>
+</html>
