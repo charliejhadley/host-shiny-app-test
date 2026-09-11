@@ -12,7 +12,7 @@
 <p id="msg">Connecting to shinyapps...</p>
 <iframe id="app"></iframe>
 <script>
-  const url = "https://YOUR-ACCOUNT.shinyapps.io/YOUR-APP/";
+  const url = "https://charlie-visibledata.shinyapps.io/loading-app-3/";
   const app = document.getElementById("app");
   addEventListener("message", e => {
     if (e.origin === new URL(url).origin && e.data?.type === "shiny-app-ready") {
